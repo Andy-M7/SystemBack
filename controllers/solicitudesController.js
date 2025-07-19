@@ -299,23 +299,28 @@ const enviarSolicitud = (req, res) => {
   });
 };
 
-const PDFDocument = require('pdfkit');
 
 // 12. Generar PDF de solicitud
+const PDFDocument = require('pdfkit');
+
 const generarPDFSolicitud = (req, res) => {
   const { id } = req.params;
 
+  // SQL: solo columnas realmente existentes
   const sqlCabecera = `
     SELECT s.id, s.fecha, s.version, s.estado,
-           c.nombre_razon_social AS cliente, c.direccion
+           c.nombre_razon_social AS cliente, c.direccion, c.telefono
     FROM solicitudes s
     JOIN clientes c ON s.cliente_id = c.id
     WHERE s.id = ?
   `;
+
+  // JOIN a unidades_medida para la columna de UNIDAD
   const sqlDetalle = `
-    SELECT p.nombre AS producto, d.cantidad, d.observacion
+    SELECT p.nombre AS producto, d.cantidad, d.observacion, d.producto_codigo AS codigo, u.nombre AS unidad
     FROM detalle_solicitud d
     JOIN productos p ON d.producto_codigo = p.codigo
+    JOIN unidades_medida u ON p.unidad_medida_id = u.id
     WHERE d.solicitud_id = ?
   `;
 
@@ -326,41 +331,116 @@ const generarPDFSolicitud = (req, res) => {
     db.query(sqlDetalle, [id], (err, detalleRows) => {
       if (err) return res.status(500).json({ error: 'Error al obtener detalles' });
 
-      const doc = new PDFDocument({ margin: 50 });
+      const solicitud = solicitudRows[0];
 
+      const doc = new PDFDocument({ margin: 25, size: 'A4' });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename=solicitud_${id}.pdf`);
       doc.pipe(res);
 
-      const solicitud = solicitudRows[0];
+      // Título centrado en rojo
+      doc.fontSize(13).font('Helvetica-Bold').fillColor('red')
+        .text('REQUERIMIENTO DE MATERIALES', 0, 20, { align: 'center' });
+      doc.fontSize(10).font('Helvetica').fillColor('black')
+        .text('SISTEMA INTEGRADO DE GESTIÓN', { align: 'center' });
 
-      doc.fontSize(18).text('Solicitud de Materiales', { align: 'center' });
-      doc.moveDown();
+      // Código y Versión
+      doc.fontSize(9)
+        .text('Código: RG-24-SIG-GB', 400, 22)
+        .text('Versión 00', 500, 36);
 
-      doc.fontSize(12).text(`Cliente: ${solicitud.cliente}`);
-      doc.text(`Dirección: ${solicitud.direccion}`);
-      doc.text(`Fecha: ${solicitud.fecha}`);
-      doc.text(`Solicitud ID: ${solicitud.id}`);
-      doc.text(`Versión: ${solicitud.version}`);
-      doc.text(`Estado: ${solicitud.estado}`);
-      doc.moveDown();
+      // --- Cabecera principal ---
+      const yCab = 60;
+      doc.rect(25, yCab, 550, 36).stroke();
 
-      doc.fontSize(14).text('Productos Solicitados:', { underline: true });
-      doc.moveDown(0.5);
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('CLIENTE:', 28, yCab + 3);
+      doc.font('Helvetica').text(solicitud.cliente, 75, yCab + 3);
 
-      detalleRows.forEach((item, i) => {
-        doc.fontSize(12).text(`${i + 1}. ${item.producto}`);
-        doc.text(`   Cantidad: ${item.cantidad}`);
-        if (item.observacion) {
-          doc.text(`   Observación: ${item.observacion}`);
+      doc.font('Helvetica-Bold').text('DIRECCIÓN:', 28, yCab + 18);
+      doc.font('Helvetica').text(solicitud.direccion, 90, yCab + 18);
+
+      doc.font('Helvetica-Bold').text('TELÉFONO:', 400, yCab + 3);
+      doc.font('Helvetica').text(solicitud.telefono, 465, yCab + 3);
+
+      doc.font('Helvetica-Bold').text('FECHA:', 400, yCab + 18);
+      doc.font('Helvetica').text(
+        solicitud.fecha ? new Date(solicitud.fecha).toLocaleDateString() : '', 
+        450, yCab + 18
+      );
+
+      // --- Franja de advertencia ---
+      doc.fillColor('black').font('Helvetica-Bold').fontSize(10)
+        .rect(25, yCab + 38, 550, 18).fillAndStroke('#FFFBEA', '#000');
+      doc.fillColor('black').text(
+        'Por favor, solicite con anticipación su requerimiento para evitar contratiempos.',
+        27, yCab + 41, { width: 546, align: 'center' }
+      );
+
+      // --- Tabla de productos ---
+      const tableTop = yCab + 62;
+      const columnPos = {
+        item: 30,
+        cod: 60,
+        prod: 120,
+        unidad: 325,
+        cant: 385,
+        obs: 440,
+      };
+
+      // Encabezado de tabla
+      doc.font('Helvetica-Bold').fontSize(9);
+
+      doc.rect(25, tableTop, 550, 18).fillAndStroke('#EAEAEA', '#000');
+      doc.fillColor('black')
+        .text('ITEM', columnPos.item, tableTop + 4, { width: 28, align: 'center' })
+        .text('COD', columnPos.cod, tableTop + 4, { width: 58, align: 'center' })
+        .text('PRODUCTO', columnPos.prod, tableTop + 4, { width: 205, align: 'center' })
+        .text('UNIDAD', columnPos.unidad, tableTop + 4, { width: 55, align: 'center' })
+        .text('CANTIDAD', columnPos.cant, tableTop + 4, { width: 50, align: 'center' })
+        .text('OBSERVACIONES', columnPos.obs, tableTop + 4, { width: 130, align: 'center' });
+
+      // Filas de productos
+      let y = tableTop + 18;
+      let rowHeight = 18;
+
+      detalleRows.forEach((prod, idx) => {
+        doc.rect(25, y, 550, rowHeight).stroke();
+        doc.font('Helvetica').fontSize(9).fillColor('black')
+          .text(idx + 1, columnPos.item, y + 4, { width: 28, align: 'center' })
+          .text(prod.codigo || '', columnPos.cod, y + 4, { width: 58, align: 'center' })
+          .text(prod.producto || '', columnPos.prod, y + 4, { width: 205 })
+          .text(prod.unidad || '', columnPos.unidad, y + 4, { width: 55, align: 'center' })
+          .text(prod.cantidad || '', columnPos.cant, y + 4, { width: 50, align: 'center' });
+
+        if (prod.observacion) {
+          doc.font('Helvetica-Bold').fillColor('red')
+            .text(prod.observacion, columnPos.obs, y + 4, { width: 130 });
+          doc.font('Helvetica').fillColor('black');
         }
-        doc.moveDown(0.3);
+        y += rowHeight;
       });
+
+      // --- Fila vacía para completar tabla hasta 10 filas (opcional) ---
+      for (let i = detalleRows.length; i < 10; i++) {
+        doc.rect(25, y, 550, rowHeight).stroke();
+        y += rowHeight;
+      }
+
+      // --- Información de pie: estado y versión ---
+      doc.font('Helvetica-Bold').fontSize(9)
+        .text('Estado:', 25, y + 25)
+        .font('Helvetica').text(solicitud.estado, 70, y + 25);
+
+      doc.font('Helvetica-Bold')
+        .text('Versión:', 200, y + 25)
+        .font('Helvetica').text(solicitud.version, 250, y + 25);
 
       doc.end();
     });
   });
 };
+
 
 
 module.exports = {
