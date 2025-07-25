@@ -1,4 +1,7 @@
 const db = require('../config/db');
+const path = require('path');
+const fs = require('fs');
+const PDFDocument = require('pdfkit');
 
 // 1. Registrar nueva solicitud
 const registrarSolicitud = (req, res) => {
@@ -300,13 +303,11 @@ const enviarSolicitud = (req, res) => {
 };
 
 
-// 12. Generar PDF de solicitud
-const PDFDocument = require('pdfkit');
-
-const generarPDFSolicitud = (req, res) => {
+// 12. Generar y guardar PDF de solicitud en disco (moderno/corregido)
+const generarYGuardarPDFSolicitud = (req, res) => {
   const { id } = req.params;
+  console.log('➡️ Iniciando generación de PDF para solicitud', id);
 
-  // SQL: solo columnas realmente existentes
   const sqlCabecera = `
     SELECT s.id, s.fecha, s.version, s.estado,
            c.nombre_razon_social AS cliente, c.direccion, c.telefono
@@ -314,8 +315,6 @@ const generarPDFSolicitud = (req, res) => {
     JOIN clientes c ON s.cliente_id = c.id
     WHERE s.id = ?
   `;
-
-  // JOIN a unidades_medida para la columna de UNIDAD
   const sqlDetalle = `
     SELECT p.nombre AS producto, d.cantidad, d.observacion, d.producto_codigo AS codigo, u.nombre AS unidad
     FROM detalle_solicitud d
@@ -325,51 +324,54 @@ const generarPDFSolicitud = (req, res) => {
   `;
 
   db.query(sqlCabecera, [id], (err, solicitudRows) => {
-    if (err) return res.status(500).json({ error: 'Error al obtener solicitud' });
+    if (err) {
+      console.error('❌ Error SQL cabecera:', err);
+      return res.status(500).json({ error: 'Error al obtener solicitud' });
+    }
     if (solicitudRows.length === 0) return res.status(404).json({ error: 'Solicitud no encontrada' });
 
     db.query(sqlDetalle, [id], (err, detalleRows) => {
-      if (err) return res.status(500).json({ error: 'Error al obtener detalles' });
+      if (err) {
+        console.error('❌ Error SQL detalle:', err);
+        return res.status(500).json({ error: 'Error al obtener detalles' });
+      }
 
       const solicitud = solicitudRows[0];
+      const carpetaPDFs = path.join(__dirname, '..', 'assets', 'pdfs');
+      if (!fs.existsSync(carpetaPDFs)){
+        fs.mkdirSync(carpetaPDFs, { recursive: true });
+      }
+      const filename = `solicitud_${id}.pdf`;
+      const rutaArchivo = path.join(carpetaPDFs, filename);
 
+      console.log('📝 Escribiendo PDF en:', rutaArchivo);
       const doc = new PDFDocument({ margin: 25, size: 'A4' });
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename=solicitud_${id}.pdf`);
-      doc.pipe(res);
+      const stream = fs.createWriteStream(rutaArchivo);
+      doc.pipe(stream);
 
-      // Título centrado en rojo
+      // --- Título, Cabecera, Tabla, Footer: aquí va EXACTO lo que ya tienes ---
       doc.fontSize(13).font('Helvetica-Bold').fillColor('red')
         .text('REQUERIMIENTO DE MATERIALES', 0, 20, { align: 'center' });
       doc.fontSize(10).font('Helvetica').fillColor('black')
         .text('SISTEMA INTEGRADO DE GESTIÓN', { align: 'center' });
-
-      // Código y Versión
       doc.fontSize(9)
         .text('Código: RG-24-SIG-GB', 400, 22)
         .text('Versión 00', 500, 36);
 
-      // --- Cabecera principal ---
       const yCab = 60;
       doc.rect(25, yCab, 550, 36).stroke();
-
       doc.font('Helvetica-Bold').fontSize(9);
       doc.text('CLIENTE:', 28, yCab + 3);
       doc.font('Helvetica').text(solicitud.cliente, 75, yCab + 3);
-
       doc.font('Helvetica-Bold').text('DIRECCIÓN:', 28, yCab + 18);
       doc.font('Helvetica').text(solicitud.direccion, 90, yCab + 18);
-
       doc.font('Helvetica-Bold').text('TELÉFONO:', 400, yCab + 3);
       doc.font('Helvetica').text(solicitud.telefono, 465, yCab + 3);
-
       doc.font('Helvetica-Bold').text('FECHA:', 400, yCab + 18);
       doc.font('Helvetica').text(
         solicitud.fecha ? new Date(solicitud.fecha).toLocaleDateString() : '', 
         450, yCab + 18
       );
-
-      // --- Franja de advertencia ---
       doc.fillColor('black').font('Helvetica-Bold').fontSize(10)
         .rect(25, yCab + 38, 550, 18).fillAndStroke('#FFFBEA', '#000');
       doc.fillColor('black').text(
@@ -377,7 +379,6 @@ const generarPDFSolicitud = (req, res) => {
         27, yCab + 41, { width: 546, align: 'center' }
       );
 
-      // --- Tabla de productos ---
       const tableTop = yCab + 62;
       const columnPos = {
         item: 30,
@@ -388,9 +389,7 @@ const generarPDFSolicitud = (req, res) => {
         obs: 440,
       };
 
-      // Encabezado de tabla
       doc.font('Helvetica-Bold').fontSize(9);
-
       doc.rect(25, tableTop, 550, 18).fillAndStroke('#EAEAEA', '#000');
       doc.fillColor('black')
         .text('ITEM', columnPos.item, tableTop + 4, { width: 28, align: 'center' })
@@ -400,10 +399,8 @@ const generarPDFSolicitud = (req, res) => {
         .text('CANTIDAD', columnPos.cant, tableTop + 4, { width: 50, align: 'center' })
         .text('OBSERVACIONES', columnPos.obs, tableTop + 4, { width: 130, align: 'center' });
 
-      // Filas de productos
       let y = tableTop + 18;
       let rowHeight = 18;
-
       detalleRows.forEach((prod, idx) => {
         doc.rect(25, y, 550, rowHeight).stroke();
         doc.font('Helvetica').fontSize(9).fillColor('black')
@@ -412,7 +409,6 @@ const generarPDFSolicitud = (req, res) => {
           .text(prod.producto || '', columnPos.prod, y + 4, { width: 205 })
           .text(prod.unidad || '', columnPos.unidad, y + 4, { width: 55, align: 'center' })
           .text(prod.cantidad || '', columnPos.cant, y + 4, { width: 50, align: 'center' });
-
         if (prod.observacion) {
           doc.font('Helvetica-Bold').fillColor('red')
             .text(prod.observacion, columnPos.obs, y + 4, { width: 130 });
@@ -421,27 +417,46 @@ const generarPDFSolicitud = (req, res) => {
         y += rowHeight;
       });
 
-      // --- Fila vacía para completar tabla hasta 10 filas (opcional) ---
       for (let i = detalleRows.length; i < 10; i++) {
         doc.rect(25, y, 550, rowHeight).stroke();
         y += rowHeight;
       }
 
-      // --- Información de pie: estado y versión ---
       doc.font('Helvetica-Bold').fontSize(9)
         .text('Estado:', 25, y + 25)
-        .font('Helvetica').text(solicitud.estado, 70, y + 25);
-
-      doc.font('Helvetica-Bold')
+        .font('Helvetica').text(solicitud.estado, 70, y + 25)
+        .font('Helvetica-Bold')
         .text('Versión:', 200, y + 25)
         .font('Helvetica').text(solicitud.version, 250, y + 25);
 
       doc.end();
+
+      stream.on('finish', () => {
+        console.log('✅ PDF generado correctamente:', rutaArchivo);
+        return res.json({
+          message: 'PDF generado correctamente',
+          url: `/pdfs/${filename}`
+        });
+      });
+      stream.on('error', (err) => {
+        console.error('❌ Error al guardar PDF:', err);
+        return res.status(500).json({ error: 'Error al guardar PDF: ' + err.message });
+      });
     });
   });
 };
 
+// 13. Descargar PDF generado
+const descargarPDFSolicitud = (req, res) => {
+  const { id } = req.params;
+  const filename = `solicitud_${id}.pdf`;
+  const rutaArchivo = path.join(__dirname, '..', 'assets', 'pdfs', filename);
 
+  if (!fs.existsSync(rutaArchivo)) {
+    return res.status(404).json({ error: 'PDF no existe' });
+  }
+  res.download(rutaArchivo, filename);
+};
 
 module.exports = {
   registrarSolicitud,
@@ -453,7 +468,7 @@ module.exports = {
   obtenerDetalle,
   historialSolicitudes,
   obtenerSolicitudPorId,
-  forzarRegistrarSolicitud,
-  enviarSolicitud, // ✅ nuevo
-  generarPDFSolicitud // ✅ nuevo
+  generarYGuardarPDFSolicitud,
+  descargarPDFSolicitud,
 };
+

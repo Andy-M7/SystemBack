@@ -15,8 +15,11 @@ const solicitudesRoutes = require('./routes/solicitudesRoutes');
 const app = express();
 const port = 5000;
 
-// ✅ Servir archivos estáticos desde /public
+// Servir archivos estáticos desde /public
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ⭐️ Servir PDFs estáticos desde /assets/pdfs como /pdfs ⭐️
+app.use('/pdfs', express.static(path.join(__dirname, 'assets/pdfs')));
 
 // Middleware global
 app.use(cors());
@@ -27,8 +30,6 @@ app.use((req, res, next) => {
   console.log(`[${req.method}] ${req.originalUrl}`);
   next();
 });
-
-
 
 // Rutas reales
 app.use('/empleados', empleadosRoutes);
