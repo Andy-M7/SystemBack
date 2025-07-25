@@ -54,4 +54,7 @@ router.get('/:id/descargar_pdf', controller.descargarPDFSolicitud);
 // (OPCIONAL LEGACY: Generar Y ENVIAR PDF AL VUELO, no guardar - si quieres mantenerlo; si NO, puedes quitarlo)
 //router.get('/:id/pdf', controller.generarPDFSolicitud);
 
+router.post('/:id/enviar_logistica', controller.enviarSolicitud);
+
+
 module.exports = router;

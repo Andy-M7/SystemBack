@@ -271,36 +271,56 @@ const forzarRegistrarSolicitud = (req, res) => {
   });
 };
 
-// 11. Enviar solicitud (nuevo)
+// 11. Enviar solicitud (nuevo: 'Enviar a Logística')
 const enviarSolicitud = (req, res) => {
   const { id } = req.params;
 
+  // 1. Verifica que la solicitud está pendiente
   const validarSolicitud = 'SELECT estado FROM solicitudes WHERE id = ?';
   db.query(validarSolicitud, [id], (err, solicitudRes) => {
-    if (err) return res.status(500).json({ error: err });
-    if (solicitudRes.length === 0) return res.status(404).json({ error: 'Solicitud no encontrada' });
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Error al consultar la solicitud.' });
+    }
+    if (solicitudRes.length === 0) {
+      return res.status(404).json({ error: 'Solicitud no encontrada.' });
+    }
 
     const estado = solicitudRes[0].estado;
     if (estado !== 'Pendiente') {
-      return res.status(400).json({ error: 'La solicitud ya fue procesada o está cerrada.' });
+      return res
+        .status(400)
+        .json({ error: 'La solicitud ya fue enviada o procesada.' });
     }
 
+    // 2. Verifica que tenga al menos un producto
     const validarProductos = 'SELECT COUNT(*) AS total FROM detalle_solicitud WHERE solicitud_id = ?';
     db.query(validarProductos, [id], (err, productosRes) => {
-      if (err) return res.status(500).json({ error: err });
-
+      if (err) return res.status(500).json({ error: 'Error al consultar productos.' });
       if (productosRes[0].total === 0) {
         return res.status(400).json({ error: 'No se puede enviar una solicitud sin productos.' });
       }
 
-      const actualizar = "UPDATE solicitudes SET estado = 'Enviada', ultima_actualizacion = CURRENT_TIMESTAMP WHERE id = ?";
+      // 3. Cambia el estado a 'Enviada'
+      const actualizar = `
+        UPDATE solicitudes 
+        SET estado = 'Enviada', ultima_actualizacion = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `;
       db.query(actualizar, [id], (err) => {
-        if (err) return res.status(500).json({ error: err });
-        return res.json({ mensaje: 'Solicitud enviada correctamente' });
+        if (err) return res.status(500).json({ error: 'Error al actualizar el estado.' });
+
+        // 4. Devuelve estado actualizado al frontend
+        return res.json({
+          mensaje: 'Solicitud enviada a logística correctamente.',
+          estado: 'Enviada',
+          solicitud_id: id,
+        });
       });
     });
   });
 };
+
 
 
 // 12. Generar y guardar PDF de solicitud en disco (moderno/corregido)
@@ -470,5 +490,6 @@ module.exports = {
   obtenerSolicitudPorId,
   generarYGuardarPDFSolicitud,
   descargarPDFSolicitud,
+  enviarSolicitud,
 };
 
