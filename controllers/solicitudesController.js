@@ -478,6 +478,154 @@ const descargarPDFSolicitud = (req, res) => {
   res.download(rutaArchivo, filename);
 };
 
+// 14. Aprobar una solicitud (por logística)
+const aprobarSolicitud = (req, res) => {
+  const { solicitud_id } = req.params;
+  // Si tienes autenticación por usuario logístico, obtén su ID aquí
+  // const usuario_logistica_id = req.user?.id;
+
+  // 14.1. Verifica estado actual de la solicitud
+  const buscar = `SELECT estado FROM solicitudes WHERE id = ?`;
+  db.query(buscar, [solicitud_id], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Error al consultar solicitud' });
+    if (rows.length === 0) return res.status(404).json({ error: 'Solicitud no encontrada' });
+
+    // Solo se puede aprobar si está en 'Enviada'
+    if (rows[0].estado !== 'Enviada') {
+      return res.status(400).json({ error: 'Sólo pueden aprobarse solicitudes en estado "Enviada".' });
+    }
+
+    // 14.2. Cambia el estado, registra la fecha y (opcionalmente) el usuario logístico
+    const actualizar = `
+      UPDATE solicitudes 
+      SET estado = 'Aprobada', 
+          ultima_actualizacion = CURRENT_TIMESTAMP, 
+          fecha_aprobacion = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `;
+    db.query(actualizar, [solicitud_id], (err) => {
+      if (err) return res.status(500).json({ error: 'Error al aprobar solicitud' });
+      return res.json({ mensaje: 'Solicitud aprobada correctamente.' });
+    });
+  });
+};
+
+
+// 15. Listar todas las solicitudes en estado "Enviada a Logística" (para logística)
+const listarSolicitudesLogistica = (req, res) => {
+  const { cliente, estado, fecha_ini, fecha_fin } = req.query;
+  let sql = `
+    SELECT s.id, c.nombre_razon_social AS cliente, s.fecha, u.correo_electronico AS usuario,
+           s.estado, s.version, s.ultima_actualizacion
+    FROM solicitudes s
+      JOIN clientes c ON s.cliente_id = c.id
+      JOIN usuarios u ON s.usuario_id = u.id
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (estado) {
+    sql += ' AND s.estado = ?';
+    params.push(estado);
+  } else {
+    // Opcional: si quieres que por defecto solo liste 'Enviada', descomenta esta línea
+    // sql += " AND s.estado = 'Enviada'";
+  }
+
+  if (cliente) {
+    sql += ' AND c.nombre_razon_social LIKE ?';
+    params.push('%' + cliente + '%');
+  }
+  
+  if (fecha_ini && fecha_fin) {
+    sql += ' AND s.fecha BETWEEN ? AND ?';
+    params.push(fecha_ini, fecha_fin);
+  }
+
+  sql += ' ORDER BY s.fecha DESC, s.id DESC';
+
+  db.query(sql, params, (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Error al listar solicitudes' });
+    return res.json(rows);
+  });
+};
+
+
+// 16. Agregar detalle Logistica
+
+const agregarDetalleLogistica = (req, res) => {
+const { solicitud_id } = req.params;
+const { producto_codigo, cantidad, observacion } = req.body;
+
+const sqlEstado = 'SELECT estado FROM solicitudes WHERE id = ?';
+db.query(sqlEstado, [solicitud_id], (err, rows) => {
+if (err) return res.status(500).json({ error: err });
+if (rows.length === 0) return res.status(404).json({ message: 'Solicitud no encontrada' });
+
+const estado = rows[0].estado;
+if (estado !== 'Enviada') {
+  return res.status(400).json({ message: 'Operación permitida solo para solicitudes Enviadas.' });
+}
+
+const insertar = `
+  INSERT INTO detalle_solicitud (solicitud_id, producto_codigo, cantidad, observacion)
+  VALUES (?, ?, ?, ?)
+`;
+db.query(insertar, [solicitud_id, producto_codigo, cantidad, observacion || null], (err2) => {
+  if (err2) return res.status(500).json({ error: err2 });
+  return res.status(201).json({ message: 'Detalle agregado correctamente (logística).' });
+});
+});
+};
+
+// 17. Editar detalle Logistica
+
+const editarDetalleLogistica = (req, res) => {
+const { detalle_id } = req.params;
+const { cantidad, observacion } = req.body;
+
+const sqlEstado = 'SELECT s.estado FROM detalle_solicitud d JOIN solicitudes s ON s.id = d.solicitud_id WHERE d.id = ?' ;
+db.query(sqlEstado, [detalle_id], (err, rows) => {
+if (err) return res.status(500).json({ error: err });
+if (rows.length === 0) return res.status(404).json({ message: 'Solicitud no encontrada' });
+
+const estado = rows[0].estado;
+if (estado !== 'Enviada') {
+  return res.status(400).json({ message: 'Operación permitida solo para solicitudes Enviadas.' });
+}
+
+const actualizar = 'UPDATE detalle_solicitud SET cantidad = ?, observacion = ? WHERE id = ?';
+db.query(actualizar, [cantidad, observacion || null, detalle_id], (err2) => {
+  if (err2) return res.status(500).json({ error: err2 });
+  return res.json({ message: 'Detalle actualizado correctamente (logística).' });
+});
+});
+};
+
+// 18. Eliminar detalle Logistica
+
+const eliminarDetalleLogistica = (req, res) => {
+const { detalle_id } = req.params;
+
+const sqlEstado = 'SELECT s.estado FROM detalle_solicitud d JOIN solicitudes s ON s.id = d.solicitud_id WHERE d.id = ?' ;
+db.query(sqlEstado, [detalle_id], (err, rows) => {
+if (err) return res.status(500).json({ error: err });
+if (rows.length === 0) return res.status(404).json({ message: 'Solicitud no encontrada' });
+
+const estado = rows[0].estado;
+if (estado !== 'Enviada') {
+  return res.status(400).json({ message: 'Operación permitida solo para solicitudes Enviadas.' });
+}
+
+db.query('DELETE FROM detalle_solicitud WHERE id = ?', [detalle_id], (err2) => {
+  if (err2) return res.status(500).json({ error: err2 });
+  return res.json({ message: 'Producto eliminado correctamente (logística).' });
+});
+});
+};
+
+
+
 module.exports = {
   registrarSolicitud,
   agregarDetalleBloque,
@@ -491,5 +639,10 @@ module.exports = {
   generarYGuardarPDFSolicitud,
   descargarPDFSolicitud,
   enviarSolicitud,
+  aprobarSolicitud,
+  listarSolicitudesLogistica,
+  agregarDetalleLogistica,
+  editarDetalleLogistica,
+  eliminarDetalleLogistica,
 };
 

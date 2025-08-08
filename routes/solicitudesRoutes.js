@@ -38,6 +38,13 @@ router.get('/detalle/:solicitud_id', controller.obtenerDetalle);
 // Historial con filtros (query params)
 router.get('/historial', controller.historialSolicitudes);
 
+// (Opcional, para filtrar SOLO solicitudes en logística desde frontend por una ruta clara)
+router.get('/logistica', /*authLogistica,*/ controller.listarSolicitudesLogistica);
+
+router.post('/:solicitud_id/logistica/detalle', controller.agregarDetalleLogistica);
+router.put('/logistica/detalle/:detalle_id', controller.editarDetalleLogistica);
+router.delete('/logistica/detalle/:detalle_id', controller.eliminarDetalleLogistica);
+
 // Obtener una solicitud por ID
 router.get('/:solicitud_id', controller.obtenerSolicitudPorId);
 
@@ -55,6 +62,11 @@ router.get('/:id/descargar_pdf', controller.descargarPDFSolicitud);
 //router.get('/:id/pdf', controller.generarPDFSolicitud);
 
 router.post('/:id/enviar_logistica', controller.enviarSolicitud);
+
+// Aprobar una solicitud por logística
+router.post('/:solicitud_id/aprobar', /*authLogistica,*/ controller.aprobarSolicitud);
+
+
 
 
 module.exports = router;
