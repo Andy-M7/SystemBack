@@ -3,7 +3,7 @@ const router = express.Router();
 const controller = require('../controllers/solicitudesController');
 
 // =====================
-//      CRUD Solicitud
+//       CRUD Solicitud
 // =====================
 // Registrar nueva solicitud
 router.post('/', controller.registrarSolicitud);
@@ -51,7 +51,6 @@ router.get('/:solicitud_id', controller.obtenerSolicitudPorId);
 // =====================
 //      PDF FUNCTIONS
 // =====================
-
 // Recomendado (para generar y GUARDAR el PDF en disco)
 router.post('/:id/generar_pdf', controller.generarYGuardarPDFSolicitud);
 
@@ -59,14 +58,18 @@ router.post('/:id/generar_pdf', controller.generarYGuardarPDFSolicitud);
 router.get('/:id/descargar_pdf', controller.descargarPDFSolicitud);
 
 // (OPCIONAL LEGACY: Generar Y ENVIAR PDF AL VUELO, no guardar - si quieres mantenerlo; si NO, puedes quitarlo)
-//router.get('/:id/pdf', controller.generarPDFSolicitud);
+// router.get('/:id/pdf', controller.generarPDFSolicitud);
 
 router.post('/:id/enviar_logistica', controller.enviarSolicitud);
 
+// =====================
+//  Acciones por Logística
+// =====================
 // Aprobar una solicitud por logística
 router.post('/:solicitud_id/aprobar', /*authLogistica,*/ controller.aprobarSolicitud);
 
-
-
+// Rechazar una solicitud por logística (nueva ruta)
+router.post('/:solicitud_id/rechazar', /*authLogistica,*/ controller.rechazarSolicitud);
 
 module.exports = router;
+

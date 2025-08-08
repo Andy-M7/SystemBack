@@ -624,6 +624,37 @@ db.query('DELETE FROM detalle_solicitud WHERE id = ?', [detalle_id], (err2) => {
 });
 };
 
+// 19. Rechazar una solicitud (por logística)
+const rechazarSolicitud = (req, res) => {
+  const { solicitud_id } = req.params;
+  // Si tienes autenticación por usuario logístico, obtén su ID aquí
+  // const usuario_logistica_id = req.user?.id;
+
+  // 15.1. Verifica estado actual de la solicitud
+  const buscar = `SELECT estado FROM solicitudes WHERE id = ?`;
+  db.query(buscar, [solicitud_id], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Error al consultar solicitud' });
+    if (rows.length === 0) return res.status(404).json({ error: 'Solicitud no encontrada' });
+
+    // Solo se puede rechazar si está en 'Enviada'
+    if (rows[0].estado !== 'Enviada') {
+      return res.status(400).json({ error: 'Sólo pueden rechazarse solicitudes en estado "Enviada".' });
+    }
+
+    // 15.2. Cambia el estado, registra la fecha y (opcionalmente) el usuario logístico
+    const actualizar = `
+      UPDATE solicitudes 
+      SET estado = 'Rechazada', 
+          ultima_actualizacion = CURRENT_TIMESTAMP, 
+          fecha_rechazo = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `;
+    db.query(actualizar, [solicitud_id], (err) => {
+      if (err) return res.status(500).json({ error: 'Error al rechazar solicitud' });
+      return res.json({ mensaje: 'Solicitud rechazada correctamente.' });
+    });
+  });
+};
 
 
 module.exports = {
@@ -644,5 +675,6 @@ module.exports = {
   agregarDetalleLogistica,
   editarDetalleLogistica,
   eliminarDetalleLogistica,
+  rechazarSolicitud,
 };
 
