@@ -93,24 +93,50 @@ const actualizarCliente = (req, res) => {
   });
 };
 
-// ELIMINAR CLIENTE
-const eliminarCliente = (req, res) => {
-  const { id } = req.params;
+// ELIMINAR CLIENTE (bloquea si tiene solicitudes Pendientes)
+  const eliminarCliente = (req, res) => {
+    const { id } = req.params;
 
-  const sql = 'DELETE FROM clientes WHERE id = ?';
-  db.query(sql, [id], (err, result) => {
-    if (err) {
-      console.error('Error al eliminar cliente:', err);
-      return res.status(500).json({ error: 'Error al eliminar cliente' });
-    }
+    if (!id) return res.status(400).json({ error: 'ID de cliente requerido' });
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Cliente no encontrado' });
-    }
+    // 1) Verificar si el cliente tiene solicitudes en estado 'Pendiente'
+    const sqlPend = `
+      SELECT COUNT(*) AS total
+      FROM solicitudes
+      WHERE cliente_id = ? AND estado = 'Pendiente'
+    `;
 
-    res.status(200).json({ mensaje: 'Cliente eliminado correctamente' });
-  });
-};
+    db.query(sqlPend, [id], (err, rows) => {
+      if (err) {
+        console.error('Error al validar pendientes:', err);
+        return res.status(500).json({ error: 'Error al validar solicitudes pendientes' });
+      }
+
+      const total = rows?.[0]?.total || 0;
+      if (total > 0) {
+        return res.status(409).json({
+          error: 'No se puede eliminar el cliente: tiene solicitudes en estado Pendiente.',
+          pendientes: total,
+        });
+      }
+
+      // 2) Si no hay pendientes, eliminar
+      const sql = 'DELETE FROM clientes WHERE id = ?';
+      db.query(sql, [id], (err2, result) => {
+        if (err2) {
+          console.error('Error al eliminar cliente:', err2);
+          return res.status(500).json({ error: 'Error al eliminar cliente' });
+        }
+
+        if (result.affectedRows === 0) {
+          return res.status(404).json({ error: 'Cliente no encontrado' });
+        }
+
+        return res.status(200).json({ mensaje: 'Cliente eliminado correctamente' });
+      });
+    });
+  };
+
 
 // OBTENER UN CLIENTE POR ID
 const obtenerClientePorId = (req, res) => {
@@ -132,6 +158,34 @@ const obtenerClientePorId = (req, res) => {
   });
 };
 
+// ✅ Verificar si un cliente tiene solicitudes 'Pendiente'
+const verificarPendientesCliente = (req, res) => {
+  const { cliente_id } = req.query;
+  if (!cliente_id) {
+    return res.status(400).json({ mensaje: 'cliente_id es requerido' });
+  }
+
+  const sql = `
+    SELECT COUNT(*) AS total
+    FROM solicitudes
+    WHERE cliente_id = ? AND estado = 'Pendiente'
+  `;
+
+  db.query(sql, [cliente_id], (err, rows) => {
+    if (err) {
+      console.error('Error al consultar pendientes:', err);
+      return res.status(500).json({ mensaje: 'Error al consultar pendientes' });
+    }
+
+    const total = rows?.[0]?.total || 0;
+    return res.json({
+      tienePendientes: total > 0,
+      total,
+    });
+  });
+};
+
+
 
 module.exports = {
   registrarCliente,
@@ -139,4 +193,5 @@ module.exports = {
   actualizarCliente,
   eliminarCliente,
   obtenerClientePorId,
+  verificarPendientesCliente,
 };
