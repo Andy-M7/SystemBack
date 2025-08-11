@@ -97,19 +97,61 @@ const registrarProducto = (req, res) => {
   });
 };
 
-// 🔁 Cambiar estado Activo/Inactivo
-const cambiarEstadoProducto = (req, res) => {
-  const { codigo } = req.params;
-  const { estado } = req.body;
+// 🔁 Cambiar estado Activo/Inactivo (con validación de pendientes)
+    const cambiarEstadoProducto = (req, res) => {
+      const { codigo } = req.params;
+      const { estado } = req.body;
 
-  if (!codigo || !estado) return res.status(400).json({ mensaje: 'Código y estado requeridos.' });
+      if (!codigo || !estado) {
+        return res.status(400).json({ mensaje: 'Código y estado requeridos.' });
+      }
 
-  const sql = 'UPDATE productos SET estado = ? WHERE codigo = ?';
-  db.query(sql, [estado, codigo], (err) => {
-    if (err) return res.status(500).json({ mensaje: 'Error al cambiar estado', error: err });
-    res.json({ mensaje: 'Estado actualizado correctamente.' });
-  });
-};
+      // Si va a INACTIVAR, primero validar que NO tenga solicitudes en estado 'Pendiente'
+      if (estado === 'Inactivo') {
+        const validarPendientesSQL = `
+          SELECT EXISTS(
+            SELECT 1
+            FROM detalle_solicitud d
+            JOIN solicitudes s ON s.id = d.solicitud_id
+            WHERE d.producto_codigo = ? 
+              AND s.estado = 'Pendiente'
+          ) AS tiene;
+        `;
+
+        db.query(validarPendientesSQL, [codigo], (err, rows) => {
+          if (err) {
+            return res.status(500).json({ mensaje: 'Error al validar pendientes', error: err });
+          }
+
+          const tienePendientes = !!rows?.[0]?.tiene;
+          if (tienePendientes) {
+            return res.status(409).json({
+              mensaje: 'No se puede inactivar el producto: existe al menos una solicitud PENDIENTE que lo incluye.'
+            });
+          }
+
+          // Sin pendientes → proceder a inactivar
+          const sql = 'UPDATE productos SET estado = ? WHERE codigo = ?';
+          db.query(sql, [estado, codigo], (err2, resultado) => {
+            if (err2) {
+              return res.status(500).json({ mensaje: 'Error al cambiar estado', error: err2 });
+            }
+            if (resultado.affectedRows === 0) {
+              return res.status(404).json({ mensaje: 'Producto no encontrado.' });
+            }
+            return res.json({ mensaje: 'Estado actualizado correctamente.' });
+          });
+        });
+      } else {
+        // Cualquier otro cambio de estado (p. ej. a Activo)
+        const sql = 'UPDATE productos SET estado = ? WHERE codigo = ?';
+        db.query(sql, [estado, codigo], (err, resultado) => {
+          if (err) return res.status(500).json({ mensaje: 'Error al cambiar estado', error: err });
+          if (resultado.affectedRows === 0) return res.status(404).json({ mensaje: 'Producto no encontrado.' });
+          return res.json({ mensaje: 'Estado actualizado correctamente.' });
+        });
+      }
+    };
 
 // ✏️ Actualizar producto existente
 const actualizarProducto = (req, res) => {
